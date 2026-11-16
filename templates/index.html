@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Nexys Control</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        if (typeof io === 'undefined') {
+            document.write('<script src="/static/socket.io.min.js"><\/script>');
+        }
+    </script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-dark: #050505;
+            --glass-bg: rgba(20, 20, 20, 0.65);
+            --accent: #2997ff;
+            --text-main: #ffffff;
+            --text-muted: #86868b;
+            --danger: #ff453a;
+            --success: #30d158;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 50% 0%, #1a1a2e 0%, transparent 60%),
+                radial-gradient(circle at 80% 80%, #150f18 0%, transparent 50%);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        header {
+            width: 100%; height: 90px; padding: 0 30px;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(5,5,5,0); position: fixed; top: 0; z-index: 100;
+        }
+
+        .app-title { font-size: 0.9rem; font-weight: 600; letter-spacing: 3px; color: rgba(255,255,255,0.8); text-transform: uppercase; border-left: 2px solid var(--accent); padding-left: 15px; }
+
+        /* STATUS WIFI */
+        .wifi-wrapper {
+            display: flex; align-items: center; gap: 12px;
+            background: rgba(30,30,30,0.5); backdrop-filter: blur(10px);
+            padding: 6px 8px 6px 16px; border-radius: 30px;
+            border: 1px solid rgba(255,255,255,0.08); height: 42px;
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #444; transition: 0.3s; flex-shrink: 0; }
+        .status-dot.connected { background: var(--success); box-shadow: 0 0 8px var(--success); }
+        .status-dot.disconnected { background: var(--danger); }
+        .status-text { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-right: 4px; padding-top: 1px; }
+        .btn-wifi { background: rgba(255,255,255,0.1); border: none; color: white; padding: 0 16px; height: 28px; border-radius: 14px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-wifi:hover { background: rgba(255,255,255,0.2); }
+
+        /* VISUALIZER */
+        .preview-area { flex: 1; display: flex; justify-content: center; align-items: center; width: 100%; position: relative; z-index: 1; }
+        #preview {
+            width: 200px; height: 200px; border-radius: 50%; background: #000;
+            border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 0 40px rgba(0,0,0,0.8);
+            transition: background-color 0.05s, box-shadow 0.05s; position: relative;
+        }
+        #preview::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; border-radius: 50%;
+            background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%); pointer-events: none;
+        }
+
+        /* CARD */
+        .control-deck {
+            width: 100%; max-width: 440px; background: var(--glass-bg);
+            backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
+            border-top-left-radius: 40px; border-top-right-radius: 40px; border-top: 1px solid rgba(255,255,255,0.15);
+            padding: 30px 30px 50px 30px; box-shadow: 0 -10px 40px rgba(0,0,0,0.3); z-index: 10;
+            animation: slideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+        /* TABS */
+        .tabs { display: flex; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 16px; margin-bottom: 30px; }
+        .tab { flex: 1; text-align: center; padding: 10px; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: 0.3s; z-index: 2; }
+        .tab.active { color: #fff; background: rgba(255,255,255,0.1); border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+
+        /* SECTIONS */
+        .control-section { display: none; }
+        .control-section.active { display: block; animation: fadeIn 0.4s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* SLIDERS */
+        .slider-group { margin-bottom: 25px; }
+        .slider-header { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+        input[type=range] { -webkit-appearance: none; width: 100%; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.1); outline: none; cursor: pointer; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 24px; width: 24px; border-radius: 50%; background: #fff; box-shadow: 0 0 15px rgba(255, 255, 255, 0.3); border: 4px solid #1a1a1a; margin-top: -9px; transition: 0.1s; }
+
+        /* FX GRID */
+        .fx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .fx-btn {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            color: var(--text-muted); padding: 20px; border-radius: 20px;
+            font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: 0.2s;
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
+        }
+        .fx-btn:hover { background: rgba(255,255,255,0.1); }
+        .fx-btn.active { background: var(--accent); color: white; border-color: var(--accent); box-shadow: 0 0 30px rgba(41, 151, 255, 0.4); }
+        .fx-icon { font-size: 1.5rem; }
+
+        /* POWER BTN */
+        .power-btn {
+            position: absolute; top: -25px; left: 50%; transform: translateX(-50%);
+            width: 50px; height: 50px; border-radius: 50%; background: #1a1a1a; border: 2px solid rgba(255,255,255,0.1);
+            color: var(--danger); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: 0 5px 20px rgba(0,0,0,0.3); transition: 0.3s; z-index: 20;
+        }
+        .power-btn:hover { transform: scale(1.1); color: #fff; background: var(--danger); border-color: var(--danger); }
+
+        /* LOGO FOOTER */
+        .footer-logo {
+            position: fixed; bottom: 30px; right: 40px; height: 150px; opacity: 0.8; transition: 0.4s; z-index: 5;
+        }
+        .footer-logo:hover { opacity: 1; transform: scale(1.05); }
+        .loader { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.2); border-top: 2px solid #fff; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="app-title">Projet Led IOT Marinia Foschia</div>
+        <div class="wifi-wrapper">
+            <div id="statusDot" class="status-dot disconnected"></div>
+            <span id="statusText" class="status-text">Hors Ligne</span>
+            <button id="wifiBtn" class="btn-wifi" onclick="toggleWifi()">Connecter</button>
+        </div>
+    </header>
+
+    <div class="preview-area">
+        <div id="preview"></div>
+    </div>
+
+    <div class="control-deck">
+        <div class="power-btn" onclick="forceOff()" title="Tout éteindre">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+        </div>
+
+        <div class="tabs">
+            <div id="tabManual" class="tab active" onclick="switchTab('manual')">Manuel</div>
+            <div id="tabDisco" class="tab" onclick="switchTab('disco')">Disco</div>
+            <div id="tabFX" class="tab" onclick="switchTab('fx')">Effets</div>
+        </div>
+
+        <div style="position: relative; min-height: 220px;">
+            
+            <!-- 1. MANUEL -->
+            <div id="manualSection" class="control-section active">
+                <div class="slider-group">
+                    <div class="slider-header"><span>Rouge</span><span id="valR">0</span></div>
+                    <input type="range" min="0" max="255" value="0" id="r" oninput="updateManual()" onchange="sendManual()">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-header"><span>Vert</span><span id="valG">0</span></div>
+                    <input type="range" min="0" max="255" value="0" id="g" oninput="updateManual()" onchange="sendManual()">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-header"><span>Bleu</span><span id="valB">0</span></div>
+                    <input type="range" min="0" max="255" value="0" id="b" oninput="updateManual()" onchange="sendManual()">
+                </div>
+            </div>
+
+            <!-- 2. DISCO -->
+            <div id="discoSection" class="control-section">
+                <div style="text-align: center; margin-bottom: 30px; opacity: 0.7;">
+                    <span style="font-size: 2rem;">🎙️</span><br>Audio Réactif
+                </div>
+                <div class="slider-group">
+                    <div class="slider-header"><span>Sensibilité</span><span id="valSens">1.0</span></div>
+                    <input type="range" min="0.5" max="3.0" step="0.1" value="1.0" id="sens" oninput="updateSettings()">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-header"><span>Strobe</span><span id="valExp">2.0</span></div>
+                    <input type="range" min="1.0" max="4.0" step="0.1" value="2.0" id="exp" oninput="updateSettings()">
+                </div>
+            </div>
+
+            <!-- 3. FX (NOUVEAU) -->
+            <div id="fxSection" class="control-section">
+                <div class="fx-grid">
+                    <div class="fx-btn" id="btn_police" onclick="setEffect('police')">
+                        <span class="fx-icon"></span>Police
+                    </div>
+                    <div class="fx-btn" id="btn_pulse" onclick="setEffect('pulse')">
+                        <span class="fx-icon"></span>Pulse
+                    </div>
+                    <div class="fx-btn" id="btn_rainbow" onclick="setEffect('rainbow')">
+                        <span class="fx-icon"></span>Rainbow
+                    </div>
+                    <div class="fx-btn" id="btn_fire" onclick="setEffect('fire')">
+                        <span class="fx-icon"></span>Feu
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <img src="/static/logo_em.svg" alt="Logo" class="footer-logo" onerror="this.style.display='none'">
+
+    <script>
+        let socket = null;
+        if (typeof io !== 'undefined') { try { socket = io(); } catch(e) {} }
+        else { socket = { on: ()=>{}, emit: ()=>{} }; }
+
+        let currentMode = "manual";
+        let lastSendTime = 0;
+        const LIMIT_MS = 60; 
+
+        // --- NAVIGATION TABS ---
+        function switchTab(tabName) {
+            // Masquer tout
+            document.querySelectorAll('.control-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+
+            // Afficher le bon
+            document.getElementById(tabName + 'Section').classList.add('active');
+            document.getElementById('tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1)).classList.add('active');
+
+            // Logique d'activation
+            if(tabName === 'manual') setEffect('manual');
+            else if(tabName === 'disco') setEffect('disco');
+            // Pour FX, on ne lance rien par défaut, on attend le clic bouton
+        }
+
+        // --- ENVOI EFFETS ---
+        function setEffect(effectName) {
+            currentMode = effectName;
+            socket.emit('set_effect', {effect: effectName});
+            
+            // Mise à jour visuelle des boutons FX
+            document.querySelectorAll('.fx-btn').forEach(btn => btn.classList.remove('active'));
+            if(effectName !== 'manual' && effectName !== 'disco') {
+                const btn = document.getElementById('btn_' + effectName);
+                if(btn) btn.classList.add('active');
+            }
+        }
+
+        // --- MANUEL ---
+        function updateManual(forceSend = false) {
+            if(currentMode !== 'manual') return;
+            const r = document.getElementById('r').value;
+            const g = document.getElementById('g').value;
+            const b = document.getElementById('b').value;
+            updateVisuals(r, g, b);
+            
+            const now = Date.now();
+            if (r == 0 && g == 0 && b == 0) {
+                socket.emit('change_color', {r:0, g:0, b:0});
+                return;
+            }
+            if (forceSend || (now - lastSendTime > LIMIT_MS)) {
+                socket.emit('change_color', {r:r, g:g, b:b});
+                lastSendTime = now;
+            }
+        }
+        function sendManual() { updateManual(true); }
+
+        // --- SETTINGS DISCO ---
+        function updateSettings() {
+            const sens = document.getElementById('sens').value;
+            const exp = document.getElementById('exp').value;
+            document.getElementById('valSens').innerText = sens;
+            document.getElementById('valExp').innerText = exp;
+            socket.emit('settings_update', {sens: sens, exp: exp});
+        }
+
+        // --- UI UPDATES ---
+        function updateVisuals(r, g, b) {
+            document.getElementById('valR').innerText = r;
+            document.getElementById('valG').innerText = g;
+            document.getElementById('valB').innerText = b;
+            document.getElementById('r').style.background = `linear-gradient(to right, #333 0%, rgb(${r},40,40) 100%)`;
+            document.getElementById('g').style.background = `linear-gradient(to right, #333 0%, rgb(40,${g},40) 100%)`;
+            document.getElementById('b').style.background = `linear-gradient(to right, #333 0%, rgb(40,40,${b}) 100%)`;
+
+            const el = document.getElementById('preview');
+            const col = `rgb(${r},${g},${b})`;
+            el.style.background = col;
+            
+            const intensity = (parseInt(r)+parseInt(g)+parseInt(b))/3;
+            if(intensity > 10) {
+                el.style.boxShadow = `0 0 ${60 + intensity/3}px ${col}`;
+                el.style.borderColor = `rgba(255,255,255,${0.2 + intensity/400})`;
+            } else {
+                el.style.boxShadow = "inset 0 0 40px rgba(0,0,0,0.8)";
+                el.style.borderColor = "rgba(255,255,255,0.05)";
+            }
+        }
+
+        function forceOff() {
+            document.getElementById('r').value = 0;
+            document.getElementById('g').value = 0;
+            document.getElementById('b').value = 0;
+            // On repasse en manuel pour éteindre
+            switchTab('manual'); 
+            updateManual(true);
+        }
+
+        // --- WIFI ---
+        function toggleWifi() {
+            const btn = document.getElementById('wifiBtn');
+            const txt = document.getElementById('statusText');
+            btn.innerHTML = '<div class="loader"></div>';
+            txt.innerText = "Patientez...";
+            
+            const currentStatus = document.getElementById('statusDot').classList.contains('connected');
+            const action = currentStatus ? 'disconnect' : 'connect';
+            socket.emit('wifi_action', {action: action});
+        }
+
+        // --- SOCKET EVENTS ---
+        socket.on('server_update', (d) => {
+            updateVisuals(d.r, d.g, d.b);
+            if(currentMode === 'manual') {
+                document.getElementById('r').value = d.r;
+                document.getElementById('g').value = d.g;
+                document.getElementById('b').value = d.b;
+            }
+        });
+
+        socket.on('status', (state) => {
+            // Update Mode Tabs
+            currentMode = state.current_effect;
+            
+            // On déduit l'onglet actif
+            if(currentMode === 'disco') switchTabUI('disco');
+            else if(currentMode === 'manual') switchTabUI('manual');
+            else {
+                // C'est un effet FX (police, etc)
+                switchTabUI('fx');
+                // Highlight le bon bouton
+                document.querySelectorAll('.fx-btn').forEach(btn => btn.classList.remove('active'));
+                const btn = document.getElementById('btn_' + currentMode);
+                if(btn) btn.classList.add('active');
+            }
+
+            // Update Wifi
+            const dot = document.getElementById('statusDot');
+            const txt = document.getElementById('statusText');
+            const btn = document.getElementById('wifiBtn');
+
+            if(state.connected_to_fpga) {
+                dot.className = "status-dot connected";
+                txt.innerText = "Connecté";
+                btn.innerText = "Déconnecter";
+            } else {
+                dot.className = "status-dot disconnected";
+                txt.innerText = "Déconnecté";
+                btn.innerText = "Connecter";
+            }
+        });
+
+        // Helper pour changer juste l'UI sans envoyer d'event (pour éviter les boucles)
+        function switchTabUI(tabName) {
+            document.querySelectorAll('.control-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabName + 'Section').classList.add('active');
+            if(tabName === 'fx') document.getElementById('tabFX').classList.add('active');
+            else document.getElementById('tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1)).classList.add('active');
+        }
+        
+        socket.on('wifi_progress', (data) => {
+            document.getElementById('statusText').innerText = data.msg;
+        });
+    </script>
+</body>
+</html>
